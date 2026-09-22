@@ -1,1 +1,1 @@
-@AGENTS.md
+@docs/WORKING-RULES.md
