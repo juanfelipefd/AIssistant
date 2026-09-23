@@ -18,6 +18,15 @@ The one exception: the app does all arithmetic. Hours available, minutes
 spent, target minus actual, days until a deadline — exact numbers computed
 from the database, handed to the model. Never ask the model to add up a week.
 
+## Server/client boundary
+Frontend and backend live in the same repo. `src/app/**/page.tsx` is
+client-facing; `src/app/api/**/route.ts` and server components are the
+backend; `src/db/` is server-only data access.
+
+`src/db/` must NEVER be imported into a client component — `DATABASE_URL`
+would end up in the browser bundle. Database access happens in API routes
+and server components only. Client code reaches it through `fetch`.
+
 ## Settled decisions — do not re-open (see SPEC §4)
 - Postgres is the app's memory. Engram is used for THIS BUILD, never inside
   the app.
