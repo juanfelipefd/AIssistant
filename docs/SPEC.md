@@ -261,6 +261,27 @@ overlaps on that date — it is **not** a whole-day replacement. Example:
 with, leaving the rest of the day intact. Recorded here now for when the
 schedule-reader code gets built later; no schedule-merging logic exists yet.
 
+### The Desk — open conversations (recorded now, built in Phase 3)
+
+Not every thought belongs to a track yet. The **Desk** is an open
+conversation surface with no track: it works exactly like a session, but
+unscoped. Ideas land there raw, and are later filed into a track or grow
+into one.
+
+- **Same machinery as session chat.** A Desk conversation is a `sessions`
+  row with `kind = 'open'` and no `track_id`; memories it produces have no
+  `track_id` until filed. Built in Phase 3 alongside the session chat.
+- **Separate conversations, not one endless thread.** Each Desk chat is its
+  own session; recall across them is through memory search.
+- **An open chat never blocks real work.** The one-active-session rule
+  applies to `kind = 'track'` sessions only.
+- **Nothing is filed automatically.** Ideas stay unfiled until explicitly
+  filed — no automatic sorting into tracks.
+
+Schema changes (pending migration): `sessions.track_id` nullable,
+`sessions.kind` enum `'track' | 'open'`, `memories.track_id` nullable, and
+the one-active-session partial index scoped to `kind = 'track'`.
+
 ### Tools available during a session
 
 | Tool | Purpose |

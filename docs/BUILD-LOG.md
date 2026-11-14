@@ -223,6 +223,42 @@ manifest alone gives installed + standalone; offline belongs to Phase 6.
   it. Per-session tokens are `SUM(token_usage)` for that `session_id` — one
   source of truth. SPEC §5 updated.
 
+### Phase 1 · Session 1 — Track API
+`src/lib/tracks.ts`, `src/app/api/tracks/**` · No UI. `POST/GET /api/tracks`,
+`GET/PATCH /api/tracks/[id]`, `POST /api/tracks/[id]/relevance`, all behind
+`requireSession()`.
+
+- Create writes the track and its first relevance row in **one
+  transaction**. Verified by forcing the second insert to fail at the database
+  (weight 9, bypassing zod → `CHECK` violation `23514`): the track insert
+  rolled back with it.
+- No delete endpoint (`DELETE` → 405). Archiving is `PATCH {"status":"archived"}`.
+- PATCH writes only `tracks`; relevance keys in its body are rejected (400).
+  Relevance changes only by appending a row.
+- "Current relevance" = latest `effective_from <= current_date` (database
+  date, i.e. UTC), newest `created_at` breaking ties — so changing your mind
+  twice in one day resolves to the later judgement. Future-dated rows work
+  as scheduled changes ("after the exam, calculus drops to 2"). Both
+  covered by `src/lib/tracks.test.ts`.
+- `GET /api/tracks` excludes archived tracks unless `?include_archived=true`.
+- Verification rows (`__verify__*`) were removed afterwards with the
+  append-only escape hatch, in one transaction; trigger confirmed re-enabled.
+
+---
+
+## Pending schema changes
+
+Decided, not yet migrated. Migrate when the slice that needs it is built.
+
+- **The Desk — open, track-less conversations** (SPEC §6, build in Phase 3
+  with session chat):
+  - `sessions.track_id` → nullable
+  - new `sessions.kind` enum: `'track' | 'open'`
+  - `memories.track_id` → nullable
+  - `sessions_one_active_idx` (one active session) scoped to
+    `kind = 'track'` only, so an open chat never blocks real work
+  - Migration pending.
+
 ---
 
 ## Conventions decided during the build
@@ -232,8 +268,13 @@ Not in `SPEC.md`; discovered while building. Follow them.
 | Decision | Detail | Why |
 |---|---|---|
 | **Primary keys** | `uuid` + `defaultRandom()` everywhere | Consistent across the FK web; no cross-environment collisions. Consequence: random UUIDs make `ORDER BY id` meaningless — order by `created_at`. |
-| **Driver (app runtime)** | `drizzle-orm/neon-http` | HTTP-based, no connection-pool problems on serverless. No multi-statement transactions — fine for runtime queries, which are single-statement. |
-| **Driver (migrations only)** | `drizzle-orm/neon-serverless` (`Pool` + `ws`), via `scripts/migrate.ts` | `neon-http` can't run migrations inside a real transaction, so a mid-migration failure used to leave partial schema state. The WebSocket `Pool` supports real `BEGIN`/`COMMIT`/`ROLLBACK`; Drizzle's migrator already wraps the batch in one transaction once the driver supports it. `npm run db:migrate` now runs this script, not the `drizzle-kit migrate` CLI (which failed silently under Git Bash on Windows). App runtime is untouched — still `neon-http`. |
+| **Driver (app runtime)** | `drizzle-orm/neon-serverless` (WebSocket `Pool` + `ws`), via `withDb()` in `src/db/index.ts` — **reversed** from `neon-http` in Phase 1 | The app now needs real multi-statement transactions (a track and its first relevance row are written atomically), which `neon-http` can't do. Its latency advantage is irrelevant at single-user request volume. **Per-request pool:** on serverless a WebSocket can't outlive the request that opened it (Neon driver README), so `withDb(fn)` creates the `Pool`, runs `fn`, and closes it — never a module-level client. One `withDb` per request handler; long waits (a model call) happen outside it. `ws` is a runtime dependency because Node before 22 has no global `WebSocket`. |
+| **Driver (migrations)** | `drizzle-orm/neon-serverless` (`Pool` + `ws`), via `scripts/migrate.ts` | Same driver as the app. `neon-http` can't run migrations inside a real transaction, so a mid-migration failure used to leave partial schema state. Drizzle's migrator wraps the batch in one transaction once the driver supports it. `npm run db:migrate` runs this script, not the `drizzle-kit migrate` CLI (which failed silently under Git Bash on Windows). |
+| **snake_case everywhere on the wire** | Every API request and response body, query param, and (from Phase 3) every model tool-call schema uses snake_case. camelCase exists only inside TypeScript (Drizzle row objects), translated at one serializer per resource. | One convention across the whole system means less translation: it matches SPEC §5 and the database, **and** the Anthropic API's own fields (`max_tokens`, `stop_reason`, `input_tokens`, `tool_use`) — tool schemas the model reads and fills will be snake_case too. Don't let Phase 3 drift into camelCase. |
+| **API shape** | Input validated with zod (`strictObject` — unknown keys are a 400); errors are `{ error, issues: [{ path, message }] }` | Strict schemas are what make "PATCH cannot touch relevance" enforceable, not just a convention. Helpers: `readJson()` / `validate()` in `src/lib/http.ts`. |
+| **Lists exclude archived by default** | `GET /api/tracks` omits archived tracks; `?include_archived=true` opts in. Same for `listTracks()`. | Choose the failure mode you'd notice. If the default included archived tracks, a consumer that forgets to filter (the Phase 5 ranking above all) would let them silently compete for time. Excluding by default makes forgetting loud: a track is visibly missing. |
+| **Tests** | `npm test` — `node:test` via `tsx`, files `src/**/*.test.ts`. DB tests run against the real database inside a transaction that is **always rolled back** (`inRolledBackTransaction` in `src/lib/tracks.test.ts`). | No test framework dependency. Rolled-back transactions leave nothing behind and never trip the `track_relevance` append-only trigger. Needs `.env.local` (`DATABASE_URL`). |
+| **Unauthenticated `/api/*`** | Middleware returns JSON `401`, not a redirect | An API client should get a status code, not an HTML login page. Pages still redirect to `/login`. Routes also call `requireSession()` themselves (see WORKING-RULES). |
 | **`dotenv`** | Required as a dev dependency | drizzle-kit runs outside Next.js, so it doesn't get automatic `.env.local` loading. |
 | **Project rules** | Live in `docs/WORKING-RULES.md`; `CLAUDE.md` is just `@docs/WORKING-RULES.md` | `AGENTS.md` is **regenerated by `next dev`/`next build`** — anything written there is lost. Let it revert freely; ignore its diffs. |
 | **Neon** | Connection string only. No Neon CLI, MCP, skills or `neon.ts` | Drizzle already owns the database layer; a second config system is a future collision. Revisit only if schema debugging gets painful. |
