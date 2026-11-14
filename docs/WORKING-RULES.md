@@ -27,6 +27,18 @@ backend; `src/db/` is server-only data access.
 would end up in the browser bundle. Database access happens in API routes
 and server components only. Client code reaches it through `fetch`.
 
+API routes must verify the session themselves, not rely on middleware alone.
+Middleware is the first line, not the only one — a matcher mistake or a
+future refactor must not silently expose a route. Every route under
+`src/app/api/` (except `api/auth/*`) starts with:
+
+```ts
+const denied = await requireSession(request);
+if (denied) return denied;
+```
+
+`requireSession` lives in `src/lib/auth.ts`.
+
 ## Settled decisions — do not re-open (see SPEC §4)
 - Postgres is the app's memory. Engram is used for THIS BUILD, never inside
   the app.

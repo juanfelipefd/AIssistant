@@ -9,10 +9,10 @@ build that aren't in `SPEC.md`. Keep this next to the spec; update it each sessi
 
 ## Status
 
-**Phase 0 — Scaffold: ~75% complete.**
+**Phase 0 — Scaffold: ~90% complete.**
 Deployed and installable as a PWA. Database pipeline wired and verified.
 Full schema (12 tables) migrated and verified against the live Neon database.
-Remaining: auth, token accounting.
+Single-user auth in place. Remaining: token accounting.
 
 ---
 
@@ -120,6 +120,35 @@ topic_key that isn't in the registry yet will fail the FK, by design.
   driving `drizzle-orm/neon-http/migrator`'s `migrate()` function
   programmatically instead of the CLI wrapper.
 
+### Session 4 — Auth
+Single-user password auth: `POST /api/auth/login` checks `APP_PASSWORD`
+(timing-safe), sets an HS256 `jose` JWT in an httpOnly `session` cookie
+(90 days); `POST /api/auth/logout` clears it. `src/middleware.ts` redirects
+unauthenticated requests to `/login`. API routes also guard themselves with
+`requireSession()` from `src/lib/auth.ts` — see `WORKING-RULES.md`.
+
+**Matcher exclusions are segment-anchored.** The first matcher excluded public
+paths by prefix (`(?!login|api/auth|...)`), so a future `/api/authorize` would
+have bypassed auth entirely. Each exclusion now ends in `(?:/|$)` or `$`, and
+dots are escaped. The manifest declares no `icons`; the only icon is
+`favicon.ico`, already excluded. If icons are added to `manifest.ts` later,
+their paths must be added to the matcher exclusions too.
+
+**Accepted and deferred decisions:**
+
+- **No rate limiting on `/api/auth/login` — accepted risk, not an oversight.**
+  Mitigation is password length: `APP_PASSWORD` is 32 random characters, which
+  puts online brute force out of reach.
+- **`middleware` → `proxy` migration deferred.** Both filenames are recognised
+  in Next 16.3.6 (`MIDDLEWARE_FILENAME` and `PROXY_FILENAME` in
+  `next/dist/build/utils.js`). Open question: `proxy` may run on the Node.js
+  runtime only, which would make the Edge-runtime reasoning behind choosing
+  `jose` obsolete. Verify against the actual docs before migrating.
+- **A missing `AUTH_SECRET` fails closed.** `getSecretKey()` throws, and
+  `verifySessionToken` catches it and returns false, so middleware redirects to
+  `/login`. **Diagnostic: an endless redirect to `/login` AND login itself
+  failing means check that `AUTH_SECRET` is set.**
+
 ---
 
 ## Conventions decided during the build
@@ -142,12 +171,8 @@ Not in `SPEC.md`; discovered while building. Follow them.
 
 ## Next up
 
-**Session 4 — Auth.** Password from env → signed cookie, middleware-protected
-routes. About an hour.
-
 **Session 5 — Token accounting + Phase 0 close.** Per-session token logging,
-running monthly total, hard cap. Plus the two-minute fix still outstanding: the
-page title is still "Create Next App".
+running monthly total, hard cap.
 
 **Then Phase 1** — tracks, charters, relevance. Creating a track is a
 *conversation*, not a form.
