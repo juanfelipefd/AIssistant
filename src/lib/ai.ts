@@ -3,7 +3,7 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { gte, sql } from "drizzle-orm";
 
-import { db } from "@/db";
+import { withDb } from "@/db";
 import { tokenUsage } from "@/db/schema";
 
 // The single gateway for model calls. NOTHING else in the codebase may import
@@ -94,16 +94,18 @@ function costUsd(model: string, inputTokens: number, outputTokens: number) {
  * by the database's now()).
  */
 export async function getMonthToDateUsage(): Promise<MonthToDateUsage> {
-  const rows = await db
-    .select({
-      model: tokenUsage.model,
-      inputTokens: sql<number>`coalesce(sum(${tokenUsage.inputTokens}), 0)::int`,
-      outputTokens: sql<number>`coalesce(sum(${tokenUsage.outputTokens}), 0)::int`,
-      cacheTokens: sql<number>`coalesce(sum(coalesce(${tokenUsage.cacheCreationInputTokens}, 0) + coalesce(${tokenUsage.cacheReadInputTokens}, 0)), 0)::int`,
-    })
-    .from(tokenUsage)
-    .where(gte(tokenUsage.createdAt, sql`date_trunc('month', now())`))
-    .groupBy(tokenUsage.model);
+  const rows = await withDb((db) =>
+    db
+      .select({
+        model: tokenUsage.model,
+        inputTokens: sql<number>`coalesce(sum(${tokenUsage.inputTokens}), 0)::int`,
+        outputTokens: sql<number>`coalesce(sum(${tokenUsage.outputTokens}), 0)::int`,
+        cacheTokens: sql<number>`coalesce(sum(coalesce(${tokenUsage.cacheCreationInputTokens}, 0) + coalesce(${tokenUsage.cacheReadInputTokens}, 0)), 0)::int`,
+      })
+      .from(tokenUsage)
+      .where(gte(tokenUsage.createdAt, sql`date_trunc('month', now())`))
+      .groupBy(tokenUsage.model),
+  );
 
   const usage: MonthToDateUsage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
   for (const row of rows) {
@@ -144,16 +146,20 @@ export async function callModel(
   const response = await getClient().messages.create(params);
 
   // input_tokens excludes prompt-cache writes/reads; those are stored in
-  // their own columns, as the API reports them.
-  await db.insert(tokenUsage).values({
-    sessionId: meta.sessionId ?? null,
-    model: params.model,
-    inputTokens: response.usage.input_tokens,
-    outputTokens: response.usage.output_tokens,
-    cacheCreationInputTokens: response.usage.cache_creation_input_tokens,
-    cacheReadInputTokens: response.usage.cache_read_input_tokens,
-    purpose: meta.purpose,
-  });
+  // their own columns, as the API reports them. A separate short-lived
+  // connection from the budget check — none is held open during the model
+  // call, which can take minutes.
+  await withDb((db) =>
+    db.insert(tokenUsage).values({
+      sessionId: meta.sessionId ?? null,
+      model: params.model,
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+      cacheCreationInputTokens: response.usage.cache_creation_input_tokens,
+      cacheReadInputTokens: response.usage.cache_read_input_tokens,
+      purpose: meta.purpose,
+    }),
+  );
 
   return response;
 }

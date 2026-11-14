@@ -12,6 +12,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // API clients get a 401, not a redirect to an HTML login page.
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const loginUrl = new URL("/login", request.url);
   return NextResponse.redirect(loginUrl);
 }
