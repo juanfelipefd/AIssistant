@@ -303,7 +303,8 @@ export const sessions = pgTable(
     handoffStopped: text("handoff_stopped"),
     handoffNext: text("handoff_next"),
     handoffBlockers: text("handoff_blockers"),
-    tokensUsed: integer("tokens_used").notNull().default(0),
+    // No tokens_used column: per-session tokens are derived from
+    // SUM(token_usage) — one source of truth.
   },
   (table) => [
     index("sessions_track_id_status_idx").on(table.trackId, table.status),
@@ -390,5 +391,44 @@ export const memories = pgTable(
       foreignColumns: [topicKeys.trackId, topicKeys.key],
       name: "memories_track_id_topic_key_fk",
     }).onDelete("restrict"),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// token_usage
+// ---------------------------------------------------------------------------
+
+// One row per model call, written by src/lib/ai.ts and nothing else. Stores
+// token COUNTS only — they are facts. Cost is derived from them at read time
+// using the RATES table in src/lib/ai.ts, so a pricing change (or a wrong
+// rate) never corrupts history; it's just recomputed.
+export const tokenUsage = pgTable(
+  "token_usage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Nullable: not every model call belongs to a session (e.g. track
+    // creation, ranking).
+    sessionId: uuid("session_id").references(() => sessions.id, {
+      onDelete: "restrict",
+    }),
+    model: text("model").notNull(),
+    inputTokens: integer("input_tokens").notNull(),
+    outputTokens: integer("output_tokens").notNull(),
+    // Prompt-cache writes/reads, reported separately from input_tokens and
+    // priced differently. Nullable: present whenever the API reports them.
+    cacheCreationInputTokens: integer("cache_creation_input_tokens"),
+    cacheReadInputTokens: integer("cache_read_input_tokens"),
+    // What the call was for, e.g. 'session_chat', 'track_create', 'ranking'.
+    purpose: text("purpose").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("token_usage_created_at_idx").on(table.createdAt),
+    check(
+      "token_usage_tokens_nonnegative_check",
+      sql`${table.inputTokens} >= 0 AND ${table.outputTokens} >= 0`,
+    ),
   ],
 );

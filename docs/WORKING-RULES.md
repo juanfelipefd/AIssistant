@@ -47,5 +47,8 @@ if (denied) return denied;
   Relevance, debt, urgency and staleness are stored; priority is concluded.
 - All memory access goes through lib/memory.ts. Nothing else touches the
   memory tables.
+- All model calls go through `src/lib/ai.ts`. Never import
+  `@anthropic-ai/sdk` anywhere else — the gateway is what enforces the
+  monthly budget and writes every call to `token_usage`.
 - Sessions are built before the calendar. This is deliberate.
 - Text only in v1. No voice.

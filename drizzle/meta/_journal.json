@@ -15,6 +15,20 @@
       "when": 1790122089775,
       "tag": "0001_chemical_king_bedlam",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794632388026,
+      "tag": "0002_chunky_songbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1794633037201,
+      "tag": "0003_cache_columns_drop_tokens_used",
+      "breakpoints": true
     }
   ]
 }
