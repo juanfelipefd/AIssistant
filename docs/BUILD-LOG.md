@@ -244,6 +244,27 @@ manifest alone gives installed + standalone; offline belongs to Phase 6.
 - Verification rows (`__verify__*`) were removed afterwards with the
   append-only escape hatch, in one transaction; trigger confirmed re-enabled.
 
+### Phase 1 · Session 2 — Deadlines and roadmap items
+`src/lib/deadlines.ts`, `src/lib/roadmap.ts`, `src/app/api/{tracks/[id]/deadlines,deadlines/[id],tracks/[id]/roadmap,roadmap/[id]}` · API only.
+Same conventions as session 1 (`requireSession()`, zod, snake_case, thin
+routes).
+
+- **Deadlines:** create, list (by `due_date`), PATCH, and **DELETE** (204).
+- **Roadmap items:** create (appended at `max + 100`), list (by position,
+  skipped excluded by default), PATCH. No DELETE (405) — `skipped` is the
+  soft-delete.
+- **`completed_at`** is set when an item moves *into* `done` and cleared when
+  it moves out. A redundant `done` keeps the original completion time
+  (done as one SQL `CASE` against the pre-update status).
+- **`topic_key`** must already be registered for the track — rejected
+  otherwise (see conventions).
+- `estimated_minutes > 0` enforced by zod and by the existing `CHECK` (both
+  tested).
+- SPEC §9: conversational track creation moved from Phase 1 to Phase 3 — it
+  shares the chat component with session chat and the Desk.
+- Verified with 10 tests plus real HTTP requests; verification rows removed
+  afterwards in one transaction (escape hatch for `track_relevance`).
+
 ---
 
 ## Pending schema changes
@@ -272,8 +293,11 @@ Not in `SPEC.md`; discovered while building. Follow them.
 | **Driver (migrations)** | `drizzle-orm/neon-serverless` (`Pool` + `ws`), via `scripts/migrate.ts` | Same driver as the app. `neon-http` can't run migrations inside a real transaction, so a mid-migration failure used to leave partial schema state. Drizzle's migrator wraps the batch in one transaction once the driver supports it. `npm run db:migrate` runs this script, not the `drizzle-kit migrate` CLI (which failed silently under Git Bash on Windows). |
 | **snake_case everywhere on the wire** | Every API request and response body, query param, and (from Phase 3) every model tool-call schema uses snake_case. camelCase exists only inside TypeScript (Drizzle row objects), translated at one serializer per resource. | One convention across the whole system means less translation: it matches SPEC §5 and the database, **and** the Anthropic API's own fields (`max_tokens`, `stop_reason`, `input_tokens`, `tool_use`) — tool schemas the model reads and fills will be snake_case too. Don't let Phase 3 drift into camelCase. |
 | **API shape** | Input validated with zod (`strictObject` — unknown keys are a 400); errors are `{ error, issues: [{ path, message }] }` | Strict schemas are what make "PATCH cannot touch relevance" enforceable, not just a convention. Helpers: `readJson()` / `validate()` in `src/lib/http.ts`. |
-| **Lists exclude archived by default** | `GET /api/tracks` omits archived tracks; `?include_archived=true` opts in. Same for `listTracks()`. | Choose the failure mode you'd notice. If the default included archived tracks, a consumer that forgets to filter (the Phase 5 ranking above all) would let them silently compete for time. Excluding by default makes forgetting loud: a track is visibly missing. |
-| **Tests** | `npm test` — `node:test` via `tsx`, files `src/**/*.test.ts`. DB tests run against the real database inside a transaction that is **always rolled back** (`inRolledBackTransaction` in `src/lib/tracks.test.ts`). | No test framework dependency. Rolled-back transactions leave nothing behind and never trip the `track_relevance` append-only trigger. Needs `.env.local` (`DATABASE_URL`). |
+| **Lists exclude soft-deleted rows by default** | `GET /api/tracks` omits archived tracks (`?include_archived=true` opts in); `GET /api/tracks/[id]/roadmap` omits skipped items (`?include_skipped=true`). Same defaults in `listTracks()` / `listRoadmapItems()`. | Choose the failure mode you'd notice. If the default included them, a consumer that forgets to filter (the Phase 5 ranking above all) would let archived tracks or skipped items silently compete for time. Excluding by default makes forgetting loud: something is visibly missing. |
+| **Delete vs soft-delete** | Hard `DELETE` only where nothing references the row and no memory hangs off it — currently **deadlines** only. Tracks archive (`status = 'archived'`); roadmap items skip (`status = 'skipped'`). | FKs are `RESTRICT` and history is data. A mistyped deadline should just go away; a track or roadmap item may be referenced by sessions and memories. |
+| **`topic_key` registry is never written by the roadmap API** | A roadmap item's `topic_key` (nullable) must already exist in that track's `topic_keys`; otherwise 400 on `topic_key`. Checked explicitly in `src/lib/roadmap.ts`; the composite FK is the backstop. | The registry exists so keys get reused instead of invented — it should be populated deliberately. Phase 2's `save_memory()` is what upserts it. Revisit if hand-authored roadmaps (or conversational track creation in Phase 3) need to mint keys. |
+| **Roadmap positions** | New item: `position = max(position) + 100` for the track (first item 0), computed inside the INSERT over all items including skipped. PATCH may set any integer — positions are **not** unique. List orders by `position, created_at, id`. | Spacing makes inserting between two items a single update. Without a unique constraint, equal positions need a tiebreak or their order is whatever Postgres returns, which can change between queries. `id` is the last key because rows written in one transaction share `now()` and so tie on `created_at` too. Tested. |
+| **Tests** | `npm test` — `node:test` via `tsx`, files `src/**/*.test.ts`. DB tests run against the real database inside a transaction that is **always rolled back** (`inRolledBackTransaction` in `src/lib/test-db.ts`, with insert helpers for test fixtures). | No test framework dependency. Rolled-back transactions leave nothing behind and never trip the `track_relevance` append-only trigger. Needs `.env.local` (`DATABASE_URL`). |
 | **Unauthenticated `/api/*`** | Middleware returns JSON `401`, not a redirect | An API client should get a status code, not an HTML login page. Pages still redirect to `/login`. Routes also call `requireSession()` themselves (see WORKING-RULES). |
 | **`dotenv`** | Required as a dev dependency | drizzle-kit runs outside Next.js, so it doesn't get automatic `.env.local` loading. |
 | **Project rules** | Live in `docs/WORKING-RULES.md`; `CLAUDE.md` is just `@docs/WORKING-RULES.md` | `AGENTS.md` is **regenerated by `next dev`/`next build`** — anything written there is lost. Let it revert freely; ignore its diffs. |
@@ -286,8 +310,9 @@ Not in `SPEC.md`; discovered while building. Follow them.
 
 ## Next up
 
-**Phase 1** — tracks, charters, relevance. Creating a track is a
-*conversation*, not a form.
+**Phase 1** — the API is done: tracks, relevance, deadlines, roadmap items.
+Remaining: the hand-editing UI on top of it. Conversational track creation
+moved to Phase 3 (SPEC §9).
 
 ---
 

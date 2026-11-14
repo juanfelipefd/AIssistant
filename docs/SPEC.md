@@ -421,11 +421,13 @@ Each phase should end deployed and usable.
 
 **Phase 0 — Scaffold.** Next.js on Vercel, Postgres connected, full schema migrated, single-user auth, PWA manifest, token accounting with a hard cap. Deploy an empty but working shell.
 
-**Phase 1 — Tracks, charters and relevance.** CRUD for tracks, `track_relevance` and `deadlines`. Creating a track is a *conversation*: the assistant interviews you, drafts the charter, an opening relevance with rationale, and an initial roadmap; you approve or correct. Relevance is mandatory — the create flow cannot complete without one. Revisions append a new row and never overwrite. Roadmap items are editable by hand too.
+**Phase 1 — Tracks, charters and relevance.** CRUD for tracks, `track_relevance`, `deadlines` and roadmap items, by hand. Relevance is mandatory — a track cannot be created without one. Revisions append a new row and never overwrite.
 
 **Phase 2 — Memory layer.** Implement `lib/memory.ts` and its four functions against Postgres, with full-text search and the topic-key registry. Test in isolation before anything depends on it.
 
 **Phase 3 — Sessions and chat. ← the core.** Open a session on a track, assemble context per §6, stream the conversation, expose the in-session tools, write the handoff on close. **At the end of this phase the app is already genuinely useful and memory starts accumulating.**
+
+Also in Phase 3: **conversational track creation**. Creating a track is a *conversation*: the assistant interviews you, drafts the charter, an opening relevance with rationale, and an initial roadmap; you approve or correct, and the result is written through the Phase 1 API (track and relevance in one transaction). It moved here from Phase 1 because it shares the chat component with session chat and the Desk (§6) — all three are built together on one piece of machinery instead of building the chat twice.
 
 **Phase 4 — Calendar.** Activity types, weekly template, per-date overrides, Available blocks, a week view that works on a phone.
 
