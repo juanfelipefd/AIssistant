@@ -113,7 +113,9 @@ function relevanceJson(relevance: RelevanceRow) {
 
 /**
  * Current relevance per track: the row with the latest effective_from on or
- * before today (database date), newest created_at breaking ties.
+ * before today (database date), newest created_at breaking ties, then id —
+ * rows written in one transaction share now(), so created_at alone isn't a
+ * total order. Same keys as the relevance history in getTrack().
  */
 async function currentRelevance(db: Db | Tx, trackId?: string) {
   const rows = await db
@@ -129,6 +131,7 @@ async function currentRelevance(db: Db | Tx, trackId?: string) {
       trackRelevance.trackId,
       desc(trackRelevance.effectiveFrom),
       desc(trackRelevance.createdAt),
+      desc(trackRelevance.id),
     );
   return new Map(rows.map((row) => [row.trackId, row]));
 }
@@ -197,6 +200,7 @@ export async function getTrack(db: Db | Tx, id: string) {
       .orderBy(
         desc(trackRelevance.effectiveFrom),
         desc(trackRelevance.createdAt),
+        desc(trackRelevance.id),
       ),
     currentRelevance(db, id),
   ]);

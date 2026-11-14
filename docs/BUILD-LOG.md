@@ -236,8 +236,10 @@ manifest alone gives installed + standalone; offline belongs to Phase 6.
 - PATCH writes only `tracks`; relevance keys in its body are rejected (400).
   Relevance changes only by appending a row.
 - "Current relevance" = latest `effective_from <= current_date` (database
-  date, i.e. UTC), newest `created_at` breaking ties — so changing your mind
-  twice in one day resolves to the later judgement. Future-dated rows work
+  date, i.e. UTC), newest `created_at` breaking ties, then `id` — so changing
+  your mind twice in one day resolves to the later judgement, and rows tied
+  on both (one transaction shares one `now()`) still resolve the same way on
+  every query. Same total-order rule as roadmap positions. Future-dated rows work
   as scheduled changes ("after the exam, calculus drops to 2"). Both
   covered by `src/lib/tracks.test.ts`.
 - `GET /api/tracks` excludes archived tracks unless `?include_archived=true`.
