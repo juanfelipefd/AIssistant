@@ -50,6 +50,14 @@ export async function readJson<S extends z.ZodType>(
   return validate(schema, body);
 }
 
+/** A 400 for one field, in the same shape as a zod validation failure. */
+export function invalidField(path: string, message: string): NextResponse {
+  return NextResponse.json(
+    { error: "Invalid input", issues: [{ path, message }] },
+    { status: 400 },
+  );
+}
+
 export function notFound(what: string): NextResponse {
   return NextResponse.json({ error: `${what} not found` }, { status: 404 });
 }

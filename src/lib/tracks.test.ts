@@ -3,40 +3,13 @@ import { test } from "node:test";
 
 import { sql } from "drizzle-orm";
 
-import { withDb, type Tx } from "@/db";
-import { trackRelevance, tracks } from "@/db/schema";
+import { trackRelevance } from "@/db/schema";
+import { inRolledBackTransaction, insertTestTrack } from "@/lib/test-db";
 import { getTrack, listTracks } from "@/lib/tracks";
-
-// These run against the real database, each inside a transaction that is
-// always rolled back — nothing persists, and the append-only trigger on
-// track_relevance is never involved.
-
-class Rollback extends Error {}
-
-async function inRolledBackTransaction(fn: (tx: Tx) => Promise<void>) {
-  await withDb(async (db) => {
-    try {
-      await db.transaction(async (tx) => {
-        await fn(tx);
-        throw new Rollback();
-      });
-    } catch (error) {
-      if (!(error instanceof Rollback)) throw error;
-    }
-  });
-}
-
-async function insertTrack(tx: Tx, name: string, status: "active" | "archived") {
-  const [track] = await tx
-    .insert(tracks)
-    .values({ name, kind: "study", charter: "", weeklyMinutesTarget: 60, status })
-    .returning();
-  return track;
-}
 
 test("same effective_from twice in one day: the later created_at is current", async () => {
   await inRolledBackTransaction(async (tx) => {
-    const track = await insertTrack(tx, "__test__ tie-break", "active");
+    const track = await insertTestTrack(tx, "__test__ tie-break");
     // Inserted latest-first, so the result can't come from insertion order.
     await tx.insert(trackRelevance).values([
       {
@@ -80,8 +53,8 @@ test("same effective_from twice in one day: the later created_at is current", as
 
 test("list excludes archived tracks unless explicitly included", async () => {
   await inRolledBackTransaction(async (tx) => {
-    const active = await insertTrack(tx, "__test__ active", "active");
-    const archived = await insertTrack(tx, "__test__ archived", "archived");
+    const active = await insertTestTrack(tx, "__test__ active");
+    const archived = await insertTestTrack(tx, "__test__ archived", "archived");
 
     const defaultIds = (await listTracks(tx)).map((t) => t.id);
     assert.ok(defaultIds.includes(active.id));

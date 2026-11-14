@@ -223,17 +223,21 @@ export async function updateTrack(db: Db | Tx, id: string, input: UpdateTrackInp
   return track ? trackJson(track) : null;
 }
 
+export async function trackExists(db: Db | Tx, id: string): Promise<boolean> {
+  const [track] = await db
+    .select({ id: tracks.id })
+    .from(tracks)
+    .where(eq(tracks.id, id));
+  return track !== undefined;
+}
+
 /** Appends a relevance row. Returns null if the track doesn't exist. */
 export async function appendRelevance(
   db: Db | Tx,
   trackId: string,
   input: AppendRelevanceInput,
 ) {
-  const [track] = await db
-    .select({ id: tracks.id })
-    .from(tracks)
-    .where(eq(tracks.id, trackId));
-  if (!track) {
+  if (!(await trackExists(db, trackId))) {
     return null;
   }
   const [relevance] = await db
