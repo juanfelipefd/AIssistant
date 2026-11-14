@@ -36,6 +36,21 @@ Three problems solved along the way, recorded so they don't recur:
   **If memory tools ever go quiet, check `claude mcp list` first.**
 - **jq required** by the Claude Code engram plugin on Windows. Installed via
   `winget install jqlang.jq`; the editor needed a full restart to see it on PATH.
+- **"multiple active runtime sessions" on save.** Running more than one Claude
+  Code instance against this project (e.g. the desktop app and the VS Code
+  extension) opens one Engram session each. A save without an explicit session
+  ID then matches several open sessions for the same directory and fails closed
+  instead of guessing. `engram doctor --project aissistant` reports it as
+  `ambiguous_active_runtime_sessions`. Workaround: pass the session ID
+  explicitly — the Claude Code session ID, i.e. the transcript filename under
+  `~/.claude/projects/<project>/`. **Rule: ONE Claude Code instance per project
+  at a time.**
+- **Leftover sessions from 2026-11-13.** `3d47b2f1`, `93919c55` and `0ff7c13b`
+  have zero observations and can be deleted later with
+  `engram delete session <id>` — but only when no Claude Code or Pi process is
+  running, since an open instance may still be bound to one of them. Leave the
+  September session `4b1e4cf8` alone: it holds 7 observations and is merely
+  unclosed.
 
 ### Session 1 — Deployable skeleton
 `9182b7b` · Next.js App Router, TypeScript, Tailwind, `src/`. Placeholder page,
