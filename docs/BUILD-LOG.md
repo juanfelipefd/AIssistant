@@ -9,10 +9,17 @@ build that aren't in `SPEC.md`. Keep this next to the spec; update it each sessi
 
 ## Status
 
-**Phase 0 — Scaffold: ~90% complete.**
-Deployed and installable as a PWA. Database pipeline wired and verified.
-Full schema (12 tables) migrated and verified against the live Neon database.
-Single-user auth in place. Remaining: token accounting.
+**Phase 0 — Scaffold: complete.**
+Deployed and installable as a PWA (manifest; opens standalone). Database
+pipeline wired and verified. Full schema (13 tables) migrated and verified
+against the live Neon database. Single-user auth in place. Token accounting
+with a hard cap, verified with a real call and a real refusal.
+
+Before the first model call on the deployed app, Vercel needs
+`ANTHROPIC_API_KEY` and `MONTHLY_BUDGET_USD` — without the budget,
+`callModel()` refuses every call, by design.
+
+**Next: Phase 1.**
 
 ---
 
@@ -164,6 +171,58 @@ their paths must be added to the matcher exclusions too.
   `/login`. **Diagnostic: an endless redirect to `/login` AND login itself
   failing means check that `AUTH_SECRET` is set.**
 
+### Session 5 — Token accounting
+`drizzle/0002_chunky_songbird.sql`, `drizzle/0003_cache_columns_drop_tokens_used.sql`
+· The meter goes in before the thing it meters: there are no model calls yet,
+so every call from the first one is counted.
+
+- **`token_usage`** — one row per model call: model, input/output tokens,
+  nullable `cache_creation_input_tokens`/`cache_read_input_tokens`, purpose,
+  nullable `session_id`. Stores token **counts** (facts); cost is derived at
+  read time, so a pricing change never corrupts history.
+- **`src/lib/ai.ts`** is the single gateway and the only importer of
+  `@anthropic-ai/sdk`. `callModel()` checks month-to-date spend against
+  `MONTHLY_BUDGET_USD` *before* calling, then logs the call's tokens. Cost
+  comes from the `RATES` constant at the top of the file — **updated by hand
+  when Anthropic changes pricing.**
+- **`/usage`** — server component, one number: month-to-date (UTC) spend.
+
+**Verified with real calls, not assumed.** One `claude-opus-5-5` call through
+`callModel()` wrote a `token_usage` row matching the API's reported usage
+(18 input / 4 output → $0.000152); `/usage` showed it. With
+`MONTHLY_BUDGET_USD=0.0001` (below that spend) the next call threw
+`BudgetExceededError` and the row count stayed at 1 — no API request made.
+
+**Spec fix:** SPEC §9 listed the service worker in both Phase 0 and Phase 6
+("offline shell") — a September drafting error. Removed from Phase 0: the
+manifest alone gives installed + standalone; offline belongs to Phase 6.
+
+**Accepted and deferred decisions:**
+
+- **Cap is `spent >= budget` — fails closed, by design.** A budget of `0` is
+  a kill switch: no model call runs. An unset or invalid `MONTHLY_BUDGET_USD`
+  also refuses every call. The budget is simply what Juan is willing to spend
+  per month.
+- **"Month" is the UTC calendar month** (`date_trunc('month', now())` in
+  Postgres). The budget is a safety net, not an accounting ledger; resetting
+  five hours early on the last day of the month doesn't matter. `/usage` says
+  "(UTC)" so it isn't confusing.
+- **Refusal fallbacks deferred — their own slice.** With server-side
+  fallbacks, a declined request is re-run on another model *inside the same
+  response*, and each model's part is billed at its own rates. One
+  `token_usage` row per call can't represent that; the meter needs per-model
+  logging (one row per model that ran) before fallbacks are enabled.
+- **Cache columns added before caching exists.** Context assembly will inject
+  the same charter, handoff and memories every turn — exactly the
+  repeated-prefix pattern prompt caching is for. Cache tokens are reported
+  outside `input_tokens`, so without the columns the meter would silently
+  undercount once caching is on. `RATES` has no cache prices yet, so
+  `getMonthToDateUsage()` throws if any cache tokens appear — add cache rates
+  in the same change that enables caching.
+- **`sessions.tokens_used` dropped.** It predated `token_usage` and duplicated
+  it. Per-session tokens are `SUM(token_usage)` for that `session_id` — one
+  source of truth. SPEC §5 updated.
+
 ---
 
 ## Conventions decided during the build
@@ -186,10 +245,7 @@ Not in `SPEC.md`; discovered while building. Follow them.
 
 ## Next up
 
-**Session 5 — Token accounting + Phase 0 close.** Per-session token logging,
-running monthly total, hard cap.
-
-**Then Phase 1** — tracks, charters, relevance. Creating a track is a
+**Phase 1** — tracks, charters, relevance. Creating a track is a
 *conversation*, not a form.
 
 ---

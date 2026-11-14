@@ -104,9 +104,15 @@ These were each argued out and settled. They are recorded with their reasoning s
 
 ### Cost
 
-Vercel free, Postgres free, so the only real cost is model tokens. A Claude Pro subscription does **not** include API access — that requires separate Console billing. However, since June 2026 Pro subscribers receive a separate **$20/month credit for programmatic use**, covering the Claude Agent SDK and apps built on it, metered at full API rates. **Action item:** verify whether that credit can authenticate from a serverless deployment. If yes, the app likely runs free. If no, pay-as-you-go for one user is a few dollars a month.
+Vercel free, Postgres free, so the only real cost is model tokens.
 
-Either way: **log token usage per session in the database, surface a running monthly total, and enforce a hard cap.** Build this in Phase 0, not after a surprise bill.
+**A Claude Pro subscription does not include API access.** It covers chat — web, desktop and Claude Code. It pays for *building* this project, not running it.
+
+**The Pro programmatic credit does not apply either.** The $20/month credit that comes with Pro covers the Claude Agent SDK and apps built on it. This app uses `@anthropic-ai/sdk` — the plain Messages API with an API key — which is billed separately, through Console credits.
+
+**`MONTHLY_BUDGET_USD` is a ceiling on that separate spend, not a backup fund.** At one user having a few conversations an evening, real spend is expected to be a few dollars a month. The guard exists so that a bug that loops and re-sends the full memory history can't quietly run up a bill overnight.
+
+So: **log token usage per call in the database, surface a running monthly total, and enforce a hard cap.** Built in Phase 0, before the first model call — see `src/lib/ai.ts`.
 
 ---
 
@@ -190,7 +196,8 @@ sessions
   handoff_stopped   -- exactly where you stopped
   handoff_next      -- the next concrete action
   handoff_blockers  -- what's in the way
-  tokens_used
+  -- Tokens used per session are derived, not stored:
+  -- SUM(token_usage.*_tokens) WHERE session_id = sessions.id.
 
 messages
   id, session_id
@@ -214,6 +221,18 @@ memories
 
 topic_keys          -- registry, so keys get reused instead of invented
   id, track_id, key, description, last_used_at
+
+-- Token accounting: one row per model call, written only by src/lib/ai.ts
+token_usage
+  id
+  session_id        -- nullable: not every call belongs to a session
+  model
+  input_tokens, output_tokens
+  cache_creation_input_tokens, cache_read_input_tokens  -- nullable
+  purpose           -- 'session_chat' | 'track_create' | 'ranking' | ...
+  created_at        -- indexed
+  -- Stores token COUNTS only — facts. Cost is derived at read time from a
+  -- rates table in code, so a pricing change never corrupts history.
 ```
 
 **Weekly budget is derived, not stored.** Actual minutes = `SUM(sessions.actual_minutes)` for the track within the week. Compare to `tracks.weekly_minutes_target`. No table needed.
@@ -379,7 +398,7 @@ The most-wanted feature — an assistant that knows your patterns and tells you 
 
 Each phase should end deployed and usable.
 
-**Phase 0 — Scaffold.** Next.js on Vercel, Postgres connected, full schema migrated, single-user auth, PWA manifest and service worker, token accounting with a hard cap. Deploy an empty but working shell.
+**Phase 0 — Scaffold.** Next.js on Vercel, Postgres connected, full schema migrated, single-user auth, PWA manifest, token accounting with a hard cap. Deploy an empty but working shell.
 
 **Phase 1 — Tracks, charters and relevance.** CRUD for tracks, `track_relevance` and `deadlines`. Creating a track is a *conversation*: the assistant interviews you, drafts the charter, an opening relevance with rationale, and an initial roadmap; you approve or correct. Relevance is mandatory — the create flow cannot complete without one. Revisions append a new row and never overwrite. Roadmap items are editable by hand too.
 
@@ -399,6 +418,5 @@ Sessions come **before** the calendar deliberately. The sessions-plus-memory cor
 
 ## 10. Open items
 
-- **Verify the Agent SDK subscription-credit path** before committing the model-access architecture. Fallback (direct API key, pay-as-you-go) is cheap and always works.
 - **Name the project.** "Bitácora" is a placeholder.
 - **Initial track set.** Seven tracks were mentioned: solid state, calculus, Next/React, AWS, software-engineering roadmap, gym, personal projects. In roughly 20 weekday Available hours that averages under three hours each, and two of them have external deadlines that will not negotiate. Worth deciding up front which tracks are genuinely active in the first month versus parked — and note that building this app in Next/React on Vercel means the project itself feeds the Next/React track rather than competing with it.
